@@ -9,19 +9,8 @@
 -  Логирование процесса отправки
 -  Валидные данные, соответствующие модели Order
 
-## Быстрый запуск
+## Запуск
 
-### Вариант 1: Batch скрипт (Windows)
-```cmd
-send_orders.bat
-```
-
-### Вариант 2: PowerShell скрипт
-```powershell
-.\Send-Orders.ps1
-```
-
-### Вариант 3: Напрямую через Go
 ```bash
 go run kafka_producer.go -count=10 -delay=1s
 ```
@@ -50,10 +39,6 @@ go run kafka_producer.go -count=10 -delay=0s
 go run kafka_producer.go -broker=remote-kafka:9092 -count=3
 ```
 
-### PowerShell с параметрами
-```powershell
-.\Send-Orders.ps1 -Count 10 -Delay "500ms" -Broker "localhost:9092"
-```
 
 ## Структура генерируемых данных
 
@@ -75,7 +60,7 @@ go run kafka_producer.go -broker=remote-kafka:9092 -count=3
 ## Установка зависимостей
 
 ```bash
-cd scripts
+cd producer
 go mod download
 ```
 
