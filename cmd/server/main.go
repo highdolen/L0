@@ -4,6 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/highdolen/L0/internal/cache"
@@ -55,7 +59,9 @@ func main() {
 	)
 
 	// Запускаем Kafka Consumer в горутине
-	go consumer.Start(ctx)
+	ctxWithCancel, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go consumer.Start(ctxWithCancel)
 
 	// Подключаем handlers
 	r := mux.NewRouter()
@@ -69,8 +75,42 @@ func main() {
 	r.Use(handlers.LoggingMiddleware)
 	r.Use(handlers.CORSMiddleware)
 
-	log.Printf("HTTP сервер запущен на %s", cfg.Server.Port)
-	if err := http.ListenAndServe(cfg.Server.Port, r); err != nil {
-		log.Fatalf("Ошибка запуска HTTP сервера: %v", err)
+	//Создаем HTTP сервер
+	srv := &http.Server{
+		Addr:    cfg.DB.Port,
+		Handler: r,
 	}
+
+	//Канал для перехвата сигналов
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	//Запускаем HTTP-сервер в горутине
+	go func() {
+		log.Printf("Сервер запущен на %s", cfg.Server.Port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Ошибка запуска HTTP сервера %v", err)
+		}
+	}()
+
+	<-sigChan
+	log.Println("Получен сигнал завершения, начинаем graceful shutdown...")
+	cancel()
+
+	//Создаем контекст с таймаутом для shutdown HTTP-серверва
+	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer shutdownCancel()
+
+	//Graceful shutdown HTTP-сервера
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Ошибка при graceful shutdown HTTP-сервера: %v", err)
+	} else {
+		log.Println("HTTP-сервер удачно остановлен")
+	}
+
+	//Закрываем Kafka consumer
+	consumer.Close()
+	log.Println("Kafka consumer успешно остановлен")
+
+	log.Println("Graceful shutdown завершен")
 }
