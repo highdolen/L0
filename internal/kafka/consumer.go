@@ -42,8 +42,20 @@ func NewConsumer(brokers []string, topic, groupID string, repo *database.OrderRe
 func (c *Consumer) Start(ctx context.Context) {
 	log.Println("Kafka consumer started...")
 	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Kafka consumer получил сигнал остановки")
+			return
+		default:
+		}
+
 		m, err := c.reader.ReadMessage(ctx)
 		if err != nil {
+			// Проверяем, если контекст отменён
+			if ctx.Err() != nil {
+				log.Println("Kafka consumer остановлен по контексту")
+				return
+			}
 			log.Printf("Ошибка чтения сообщения из Kafka: %v", err)
 			continue
 		}

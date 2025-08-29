@@ -58,9 +58,11 @@ func main() {
 		orderCache,
 	)
 
-	// Запускаем Kafka Consumer в горутине
+	// Создаём контекст для graceful shutdown
 	ctxWithCancel, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// Запускаем Kafka Consumer в горутине
 	go consumer.Start(ctxWithCancel)
 
 	// Подключаем handlers
@@ -75,42 +77,45 @@ func main() {
 	r.Use(handlers.LoggingMiddleware)
 	r.Use(handlers.CORSMiddleware)
 
-	//Создаем HTTP сервер
+	// Создаём HTTP сервер
 	srv := &http.Server{
-		Addr:    cfg.DB.Port,
+		Addr:    cfg.Server.Port,
 		Handler: r,
 	}
 
-	//Канал для перехвата сигналов
+	// Канал для перехвата сигналов
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	//Запускаем HTTP-сервер в горутине
+	// Запускаем HTTP сервер в горутине
 	go func() {
-		log.Printf("Сервер запущен на %s", cfg.Server.Port)
+		log.Printf("HTTP сервер запущен на %s", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Ошибка запуска HTTP сервера %v", err)
+			log.Fatalf("Ошибка запуска HTTP сервера: %v", err)
 		}
 	}()
 
+	// Ожидание сигнала для graceful shutdown
 	<-sigChan
 	log.Println("Получен сигнал завершения, начинаем graceful shutdown...")
+
+	// Отменяем контекст для остановки Kafka consumer
 	cancel()
 
-	//Создаем контекст с таймаутом для shutdown HTTP-серверва
-	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 30*time.Second)
+	// Создаём контекст с таймаутом для shutdown HTTP сервера
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	//Graceful shutdown HTTP-сервера
+	// Graceful shutdown HTTP сервера
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Ошибка при graceful shutdown HTTP-сервера: %v", err)
+		log.Printf("Ошибка при graceful shutdown HTTP сервера: %v", err)
 	} else {
-		log.Println("HTTP-сервер удачно остановлен")
+		log.Println("HTTP сервер успешно остановлен")
 	}
 
-	//Закрываем Kafka consumer
+	// Закрываем Kafka consumer
 	consumer.Close()
 	log.Println("Kafka consumer успешно остановлен")
 
-	log.Println("Graceful shutdown завершен")
+	log.Println("Graceful shutdown завершён")
 }
