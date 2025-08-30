@@ -62,9 +62,6 @@ func main() {
 	ctxWithCancel, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Запускаем Kafka Consumer в горутине
-	go consumer.Start(ctxWithCancel)
-
 	// Подключаем handlers
 	r := mux.NewRouter()
 	orderHandler := handlers.NewOrderHandler(orderCache, repo)
@@ -87,35 +84,58 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Канал для уведомления о завершении shutdown
+	shutdownComplete := make(chan bool, 1)
+
+	// Горутина для обработки сигналов и graceful shutdown
+	go func() {
+		// Ожидаем сигнал
+		sig := <-sigChan
+		log.Printf("Получен сигнал %v, начинаем graceful shutdown...", sig)
+
+		// Отменяем контекст для остановки Kafka consumer
+		log.Println("Останавливаем Kafka consumer...")
+		cancel()
+
+		// Ждем немного, чтобы consumer успел обработать отмену контекста
+		time.Sleep(100 * time.Millisecond)
+
+		// Создаём контекст с таймаутом для shutdown HTTP сервера
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+
+		// Graceful shutdown HTTP сервера
+		log.Println("Останавливаем HTTP сервер...")
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Ошибка при graceful shutdown HTTP сервера: %v", err)
+		} else {
+			log.Println("HTTP сервер успешно остановлен")
+		}
+
+		// Закрываем Kafka consumer
+		log.Println("Закрываем Kafka consumer...")
+		consumer.Close()
+		log.Println("Kafka consumer успешно остановлен")
+
+		log.Println("Graceful shutdown завершён")
+		shutdownComplete <- true
+	}()
+
+	// Запускаем Kafka Consumer в горутине
+	go consumer.Start(ctxWithCancel)
+
 	// Запускаем HTTP сервер в горутине
 	go func() {
 		log.Printf("HTTP сервер запущен на %s", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Ошибка запуска HTTP сервера: %v", err)
+			log.Printf("Ошибка HTTP сервера: %v", err)
+			// Отправляем сигнал для shutdown, если сервер упал
+			sigChan <- syscall.SIGTERM
 		}
 	}()
 
-	// Ожидание сигнала для graceful shutdown
-	<-sigChan
-	log.Println("Получен сигнал завершения, начинаем graceful shutdown...")
+	log.Println("Сервер запущен. Нажмите Ctrl+C для остановки.")
 
-	// Отменяем контекст для остановки Kafka consumer
-	cancel()
-
-	// Создаём контекст с таймаутом для shutdown HTTP сервера
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	// Graceful shutdown HTTP сервера
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Ошибка при graceful shutdown HTTP сервера: %v", err)
-	} else {
-		log.Println("HTTP сервер успешно остановлен")
-	}
-
-	// Закрываем Kafka consumer
-	consumer.Close()
-	log.Println("Kafka consumer успешно остановлен")
-
-	log.Println("Graceful shutdown завершён")
+	// Ожидаем завершения shutdown
+	<-shutdownComplete
 }

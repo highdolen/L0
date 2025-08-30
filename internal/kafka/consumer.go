@@ -41,20 +41,31 @@ func NewConsumer(brokers []string, topic, groupID string, repo *database.OrderRe
 
 func (c *Consumer) Start(ctx context.Context) {
 	log.Println("Kafka consumer started...")
+	defer log.Println("Kafka consumer выходит из цикла")
+	
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Kafka consumer получил сигнал остановки")
+			log.Printf("Kafka consumer получил сигнал остановки: %v", ctx.Err())
 			return
 		default:
+			// Продолжаем обработку
 		}
 
-		m, err := c.reader.ReadMessage(ctx)
+		// Устанавливаем короткий таймаут для ReadMessage
+		msgCtx, msgCancel := context.WithTimeout(ctx, 1*time.Second)
+		m, err := c.reader.ReadMessage(msgCtx)
+		msgCancel()
+		
 		if err != nil {
 			// Проверяем, если контекст отменён
 			if ctx.Err() != nil {
-				log.Println("Kafka consumer остановлен по контексту")
+				log.Printf("Kafka consumer остановлен по контексту: %v", ctx.Err())
 				return
+			}
+			// Если это таймаут, продолжаем
+			if msgCtx.Err() == context.DeadlineExceeded {
+				continue
 			}
 			log.Printf("Ошибка чтения сообщения из Kafka: %v", err)
 			continue
