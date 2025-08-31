@@ -15,6 +15,7 @@ import (
 	"github.com/highdolen/L0/internal/database"
 	"github.com/highdolen/L0/internal/handlers"
 	"github.com/highdolen/L0/internal/kafka"
+	"github.com/highdolen/L0/internal/service"
 	"github.com/highdolen/L0/internal/web"
 )
 
@@ -43,11 +44,18 @@ func main() {
 	// Создаём кэш с TTL 30 минут
 	orderCache := cache.New(30 * time.Minute)
 
-	// Загружаем данные из БД в кэш
-	if err := orderCache.LoadFromDB(ctx, repo); err != nil {
+	// Создаём адаптеры для сервисного слоя
+	repoAdapter := service.NewRepositoryAdapter(repo)
+	cacheAdapter := service.NewCacheAdapter(orderCache)
+
+	// Загружаем данные из БД в кэш через адаптер
+	if err := cacheAdapter.LoadFromDB(ctx, repoAdapter); err != nil {
 		log.Fatalf("Ошибка загрузки кэша: %v", err)
 	}
 	log.Println("Кэш успешно загружен")
+
+	// Создаём сервис заказов
+	orderService := service.NewOrderService(repoAdapter, cacheAdapter)
 
 	// Создаём Kafka Consumer
 	consumer := kafka.NewConsumer(
@@ -64,7 +72,7 @@ func main() {
 
 	// Подключаем handlers
 	r := mux.NewRouter()
-	orderHandler := handlers.NewOrderHandler(orderCache, repo)
+	orderHandler := handlers.NewOrderHandler(orderService)
 
 	// API для работы с заказами
 	r.HandleFunc("/order/{order_uid}", orderHandler.GetOrder).Methods("GET", "OPTIONS")

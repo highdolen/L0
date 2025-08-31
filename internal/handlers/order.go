@@ -2,24 +2,22 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/highdolen/L0/internal/cache"
-	"github.com/highdolen/L0/internal/database"
+	"github.com/highdolen/L0/internal/service"
 )
 
 type OrderHandler struct {
-	cache *cache.OrderCache
-	repo  *database.OrderRepository
+	orderService service.OrderService
 }
 
-func NewOrderHandler(cache *cache.OrderCache, repo *database.OrderRepository) *OrderHandler {
+func NewOrderHandler(orderService service.OrderService) *OrderHandler {
 	return &OrderHandler{
-		cache: cache,
-		repo:  repo,
+		orderService: orderService,
 	}
 }
 
@@ -30,49 +28,44 @@ func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	// Проверяем параметр для принудительного обновления кеша
 	forceRefresh := r.URL.Query().Get("refresh") == "true"
 
+	var result *service.OrderResult
+	var err error
+
 	if forceRefresh {
-		// Принудительно обновляем запись в кеше из БД
-		if err := h.cache.Refresh(r.Context(), uid, h.repo); err != nil {
-			log.Printf("Ошибка обновления кеша для заказа %s: %v", uid, err)
-		}
+		// Принудительно обновляем заказ из БД
+		result, err = h.orderService.GetOrderByUIDWithRefresh(r.Context(), uid)
+	} else {
+		// Обычное получение (сначала из кеша, потом из БД)
+		result, err = h.orderService.GetOrderByUID(r.Context(), uid)
 	}
 
-	// Сначала проверяем кэш
-	if cachedOrder, found := h.cache.Get(uid); found {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Cache", "HIT")
-		if err := json.NewEncoder(w).Encode(cachedOrder); err != nil {
-			http.Error(w, "Ошибка при кодировании ответа", http.StatusInternalServerError)
-		}
-		return
-	}
-
-	// Если в кэше нет, идем в базу
-	order, err := h.repo.GetOrderByUID(r.Context(), uid)
 	if err != nil {
-		http.Error(w, "Ошибка при получении заказа: "+err.Error(), http.StatusInternalServerError)
+		// Проверяем, является ли ошибка "заказ не найден"
+		if errors.Is(err, errors.New("заказ не найден")) {
+			http.Error(w, "Заказ не найден", http.StatusNotFound)
+		} else {
+			http.Error(w, "Ошибка при получении заказа: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 
-	if order == nil {
-		http.Error(w, "Заказ не найден", http.StatusNotFound)
-		return
-	}
-
-	// Добавляем в кэш для будущих запросов
-	h.cache.Set(uid, *order)
-	log.Printf("Заказ %s загружен из БД и кеширован", uid)
-
+	// Устанавливаем заголовки ответа
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Cache", "MISS")
-	if err := json.NewEncoder(w).Encode(order); err != nil {
+	if result.FromCache {
+		w.Header().Set("X-Cache", "HIT")
+	} else {
+		w.Header().Set("X-Cache", "MISS")
+	}
+
+	// Возвращаем только заказ, без метаданных
+	if err := json.NewEncoder(w).Encode(result.Order); err != nil {
 		http.Error(w, "Ошибка при кодировании ответа", http.StatusInternalServerError)
 	}
 }
 
 // GetCacheStats — получить статистику кеша
 func (h *OrderHandler) GetCacheStats(w http.ResponseWriter, r *http.Request) {
-	stats := h.cache.GetStats()
+	stats := h.orderService.GetCacheStats()
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		http.Error(w, "Ошибка при кодировании ответа", http.StatusInternalServerError)
@@ -83,16 +76,23 @@ func (h *OrderHandler) GetCacheStats(w http.ResponseWriter, r *http.Request) {
 func (h *OrderHandler) InvalidateCache(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	uid := vars["order_uid"]
-	
+
+	var err error
 	if uid != "" {
 		// Инвалидируем конкретный заказ
-		h.cache.Invalidate(uid)
-		log.Printf("Инвалидирован кеш для заказа %s", uid)
+		err = h.orderService.InvalidateCache(uid)
+		if err != nil {
+			http.Error(w, "Ошибка при инвалидации кеша: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		writeJSON(w, map[string]string{"message": fmt.Sprintf("Кеш для заказа %s инвалидирован", uid)}, http.StatusOK)
 	} else {
 		// Инвалидируем весь кеш
-		h.cache.InvalidateAll()
-		log.Println("Весь кеш инвалидирован")
+		err = h.orderService.InvalidateAllCache()
+		if err != nil {
+			http.Error(w, "Ошибка при полной инвалидации кеша: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		writeJSON(w, map[string]string{"message": "Весь кеш инвалидирован"}, http.StatusOK)
 	}
 }
