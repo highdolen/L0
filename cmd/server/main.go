@@ -40,8 +40,8 @@ func main() {
 
 	repo := database.NewOrderRepository(db)
 
-	// Создаём кэш
-	orderCache := cache.New()
+	// Создаём кэш с TTL 30 минут
+	orderCache := cache.New(30 * time.Minute)
 
 	// Загружаем данные из БД в кэш
 	if err := orderCache.LoadFromDB(ctx, repo); err != nil {
@@ -65,7 +65,24 @@ func main() {
 	// Подключаем handlers
 	r := mux.NewRouter()
 	orderHandler := handlers.NewOrderHandler(orderCache, repo)
+
+	// API для работы с заказами
 	r.HandleFunc("/order/{order_uid}", orderHandler.GetOrder).Methods("GET", "OPTIONS")
+
+	// API для управления кешом
+	r.HandleFunc("/cache/stats", orderHandler.GetCacheStats).Methods("GET", "OPTIONS")
+	r.HandleFunc("/cache/invalidate/{order_uid}", orderHandler.InvalidateCache).Methods("POST", "DELETE", "OPTIONS")
+	r.HandleFunc("/cache/invalidate", orderHandler.InvalidateCache).Methods("POST", "DELETE", "OPTIONS")
+
+	err = r.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+		path, _ := route.GetPathTemplate()
+		methods, _ := route.GetMethods()
+		log.Printf("Route registered: %s Methods: %v", path, methods)
+		return nil
+	})
+	if err != nil {
+		log.Printf("Ошибка при обходе маршрутов: %v", err)
+	}
 
 	// Подключаем веб-интерфейс
 	web.RegisterWebHandlers(r)
@@ -116,6 +133,11 @@ func main() {
 		log.Println("Закрываем Kafka consumer...")
 		consumer.Close()
 		log.Println("Kafka consumer успешно остановлен")
+
+		// Закрываем кеш (останавливаем горутину очистки)
+		log.Println("Останавливаем кеш...")
+		orderCache.Close()
+		log.Println("Кеш успешно остановлен")
 
 		log.Println("Graceful shutdown завершён")
 		shutdownComplete <- true
