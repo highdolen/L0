@@ -8,9 +8,23 @@ import (
 )
 
 func LoadConfig() (*Config, error) {
-    // Загружаем .env
-    if err := godotenv.Load(); err != nil {
-        log.Println("No .env file found, using system env variables")
+    // Пытаемся загрузить .env файлы в порядке приоритета
+    envFiles := []string{
+        ".env",                    // Корень проекта (для Docker)
+        "internal/config/.env",    // Локальная конфигурация
+    }
+    
+    envLoaded := false
+    for _, envFile := range envFiles {
+        if err := godotenv.Load(envFile); err == nil {
+            log.Printf("Загружен конфиг из %s", envFile)
+            envLoaded = true
+            break
+        }
+    }
+    
+    if !envLoaded {
+        log.Println("No .env file found, using system environment variables")
     }
 
     cfg := &Config{

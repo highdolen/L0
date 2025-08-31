@@ -10,28 +10,28 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: order_user
-      DB_PASSWORD: order_pass
-      DB_NAME: orders_service
-      DB_SSLMODE: disable
-      KAFKA_BROKER: kafka:9092
-      SERVER_PORT: :8080
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_SSLMODE: ${DB_SSLMODE}
+      KAFKA_BROKER: ${KAFKA_BROKER}
+      SERVER_PORT: ${SERVER_PORT}
 
   postgres:
     image: postgres:14
     container_name: orders_postgres
     environment:
-      POSTGRES_DB: orders_service
-      POSTGRES_USER: order_user
-      POSTGRES_PASSWORD: order_pass
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U order_user -d orders_service"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -44,10 +44,10 @@ services:
       - "9093:9093"
     environment:
       - KAFKA_ENABLE_KRAFT=yes
-      - KAFKA_KRAFT_CLUSTER_ID=2a6e19f69dc748139749a327b2232cb2
-      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_KRAFT_CLUSTER_ID=${KAFKA_CLUSTER_ID}
+      - KAFKA_CFG_NODE_ID=${KAFKA_NODE_ID}
       - KAFKA_CFG_PROCESS_ROLES=controller,broker
-      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9094
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=${KAFKA_NODE_ID}@kafka:9094
       - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
       - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,EXTERNAL://:9093,CONTROLLER://:9094
       - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://localhost:9093
