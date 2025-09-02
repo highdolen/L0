@@ -13,7 +13,7 @@ import (
 // CacheEntry представляет запись в кеше с временной меткой
 type CacheEntry struct {
 	Order     models.Order
-	Timestamp time.Time
+	Timestamp time.Time //момент, когда данные добавлены в кэш
 }
 
 type OrderCache struct {
@@ -30,10 +30,10 @@ func New(ttl time.Duration) *OrderCache {
 		ttl:      ttl,
 		stopChan: make(chan bool),
 	}
-	
+
 	// Запускаем горутину для очистки устаревших записей
 	go c.cleanupExpired()
-	
+
 	return c
 }
 
@@ -41,19 +41,19 @@ func New(ttl time.Duration) *OrderCache {
 func (c *OrderCache) Get(uid string) (models.Order, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	entry, exists := c.cache[uid]
 	if !exists {
 		return models.Order{}, false
 	}
-	
+
 	// Проверяем, не истек ли TTL
 	if time.Since(entry.Timestamp) > c.ttl {
 		// Удаляем устаревшую запись
 		delete(c.cache, uid)
 		return models.Order{}, false
 	}
-	
+
 	return entry.Order, true
 }
 
@@ -114,7 +114,7 @@ func (c *OrderCache) Refresh(ctx context.Context, uid string, repo *database.Ord
 	if err != nil {
 		return err
 	}
-	
+
 	if order != nil {
 		c.Set(uid, *order)
 		log.Printf("Заказ %s обновлен в кэше", uid)
@@ -122,7 +122,7 @@ func (c *OrderCache) Refresh(ctx context.Context, uid string, repo *database.Ord
 		c.Delete(uid)
 		log.Printf("Заказ %s удален из кэша (не найден в БД)", uid)
 	}
-	
+
 	return nil
 }
 
@@ -130,17 +130,17 @@ func (c *OrderCache) Refresh(ctx context.Context, uid string, repo *database.Ord
 func (c *OrderCache) GetStats() map[string]interface{} {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	totalEntries := len(c.cache)
 	expiredEntries := 0
 	now := time.Now()
-	
+
 	for _, entry := range c.cache {
 		if now.Sub(entry.Timestamp) > c.ttl {
 			expiredEntries++
 		}
 	}
-	
+
 	return map[string]interface{}{
 		"total_entries":   totalEntries,
 		"expired_entries": expiredEntries,
@@ -151,31 +151,31 @@ func (c *OrderCache) GetStats() map[string]interface{} {
 
 // cleanupExpired — горутина для очистки устаревших записей
 func (c *OrderCache) cleanupExpired() {
-	ticker := time.NewTicker(c.ttl / 2) // Проверяем в два раза чаще TTL
+	ticker := time.NewTicker(c.ttl / 10) // Проверяем в 10 раза чаще TTL
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
 			c.mu.Lock()
 			now := time.Now()
 			expiredKeys := make([]string, 0)
-			
+
 			for key, entry := range c.cache {
 				if now.Sub(entry.Timestamp) > c.ttl {
 					expiredKeys = append(expiredKeys, key)
 				}
 			}
-			
+
 			for _, key := range expiredKeys {
 				delete(c.cache, key)
 			}
-			
+
 			if len(expiredKeys) > 0 {
 				log.Printf("Удалено %d устаревших записей из кэша", len(expiredKeys))
 			}
 			c.mu.Unlock()
-			
+
 		case <-c.stopChan:
 			return
 		}
