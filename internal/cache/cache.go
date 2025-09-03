@@ -151,7 +151,7 @@ func (c *OrderCache) GetStats() map[string]interface{} {
 
 // cleanupExpired — горутина для очистки устаревших записей
 func (c *OrderCache) cleanupExpired() {
-	ticker := time.NewTicker(c.ttl / 10) // Проверяем в 10 раза чаще TTL
+	ticker := time.NewTicker(c.ttl / 2) // На всякий случай проверяем каждые 15 минут, вдруг что то не удалилось
 	defer ticker.Stop()
 
 	for {
@@ -162,7 +162,7 @@ func (c *OrderCache) cleanupExpired() {
 			expiredKeys := make([]string, 0)
 
 			for key, entry := range c.cache {
-				if now.Sub(entry.Timestamp) > c.ttl {
+				if now.Sub(entry.Timestamp) >= c.ttl {
 					expiredKeys = append(expiredKeys, key)
 				}
 			}

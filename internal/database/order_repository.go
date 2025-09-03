@@ -100,7 +100,7 @@ func (r *OrderRepository) GetOrderByUID(ctx context.Context, uid string) (*model
 		return nil, err
 	}
 
-	log.Printf("[DEBUG] Found order: %+v", order)
+	log.Printf("[DEBUG] Found order: %s", order.OrderUID)
 
 	// Delivery
 	err = r.db.QueryRow(ctx, `
