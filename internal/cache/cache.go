@@ -1,12 +1,10 @@
 package cache
 
 import (
-	"context"
 	"log"
 	"sync"
 	"time"
 
-	"github.com/highdolen/L0/internal/database"
 	"github.com/highdolen/L0/internal/models"
 )
 
@@ -74,27 +72,6 @@ func (c *OrderCache) Delete(uid string) {
 	delete(c.cache, uid)
 }
 
-// LoadFromDB — восстановить кэш из базы
-func (c *OrderCache) LoadFromDB(ctx context.Context, repo *database.OrderRepository) error {
-	orders, err := repo.GetAllOrders(ctx)
-	if err != nil {
-		return err
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	now := time.Now()
-	for _, order := range orders {
-		c.cache[order.OrderUID] = CacheEntry{
-			Order:     order,
-			Timestamp: now,
-		}
-	}
-
-	log.Printf("Загружено %d заказов в кэш", len(orders))
-	return nil
-}
-
 // Invalidate — инвалидировать конкретный заказ
 func (c *OrderCache) Invalidate(uid string) {
 	c.Delete(uid)
@@ -106,24 +83,6 @@ func (c *OrderCache) InvalidateAll() {
 	defer c.mu.Unlock()
 	c.cache = make(map[string]CacheEntry)
 	log.Println("Кэш полностью очищен")
-}
-
-// Refresh — обновить конкретный заказ из базы данных
-func (c *OrderCache) Refresh(ctx context.Context, uid string, repo *database.OrderRepository) error {
-	order, err := repo.GetOrderByUID(ctx, uid)
-	if err != nil {
-		return err
-	}
-
-	if order != nil {
-		c.Set(uid, *order)
-		log.Printf("Заказ %s обновлен в кэше", uid)
-	} else {
-		c.Delete(uid)
-		log.Printf("Заказ %s удален из кэша (не найден в БД)", uid)
-	}
-
-	return nil
 }
 
 // GetStats — получить статистику кэша

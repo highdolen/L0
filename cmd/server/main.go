@@ -48,14 +48,14 @@ func main() {
 	repoAdapter := service.NewRepositoryAdapter(repo)
 	cacheAdapter := service.NewCacheAdapter(orderCache)
 
+	// Создаём сервис заказов
+	orderService := service.NewOrderService(repoAdapter, cacheAdapter)
+
 	// Загружаем данные из БД в кэш через адаптер
-	if err := cacheAdapter.LoadFromDB(ctx, repoAdapter); err != nil {
+	if err := orderService.LoadFromDB(ctx); err != nil {
 		log.Fatalf("Ошибка загрузки кэша: %v", err)
 	}
 	log.Println("Кэш успешно загружен")
-
-	// Создаём сервис заказов
-	orderService := service.NewOrderService(repoAdapter, cacheAdapter)
 
 	// Создаём Kafka Consumer
 	consumer := kafka.NewConsumer(
